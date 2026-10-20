@@ -1,0 +1,91 @@
+# Sigma — regra base + regras de correlação (Sigma Correlations, tipo value_count).
+# Conversão: sigma-cli / pySigma (o suporte a correlação varia por backend — valide a saída).
+# Campos genéricos: src_ip, dst_ip, dst_port, action (mapeie via pipeline para o seu SIEM).
+title: Conexão negada/bloqueada em firewall (base para correlação de port scan)
+name: fw_denied_connection
+id: 5b0e7a3c-2f1d-4c8b-9a6e-3d4f5a6b7c8d
+status: experimental
+description: Conexão de rede negada, descartada ou rejeitada. Regra base usada pelas correlações PS-001/PS-002.
+author: João Guilherme
+date: 2026-10-20
+tags:
+  - attack.discovery
+  - attack.t1046
+logsource:
+  category: firewall
+detection:
+  selection:
+    action:
+      - deny
+      - denied
+      - drop
+      - dropped
+      - block
+      - blocked
+      - reject
+      - rejected
+  filter_structural:
+    dst_ip|cidr:
+      - 224.0.0.0/4
+      - 255.255.255.255/32
+      - 169.254.0.0/16
+  filter_authorized:
+    src_ip|cidr:
+      - 10.10.50.5/32   # scanner de vulnerabilidades autorizado
+      - 10.10.60.10/32  # servidor de monitoramento
+  condition: selection and not filter_structural and not filter_authorized
+falsepositives:
+  - Scanners e monitoramento fora da lista filter_authorized
+level: informational
+---
+title: Port scan vertical (PS-001) — 20+ portas distintas em um destino
+id: 8e9f0a1b-2c3d-4e5f-8a7b-6c5d4e3f2a1b
+status: experimental
+description: Uma origem teve conexões negadas em 20 ou mais portas distintas de um mesmo destino em 5 minutos.
+author: João Guilherme
+date: 2026-10-20
+tags:
+  - attack.discovery
+  - attack.t1046
+  - attack.reconnaissance
+  - attack.t1595.001
+correlation:
+  type: value_count
+  rules:
+    - fw_denied_connection
+  group-by:
+    - src_ip
+    - dst_ip
+  timespan: 5m
+  condition:
+    gte: 20
+    field: dst_port
+falsepositives:
+  - Scanners de vulnerabilidade autorizados não listados
+  - Aplicações com portas dinâmicas que falham em massa (investigue o serviço)
+level: medium
+---
+title: Port scan horizontal (PS-002) — mesma origem em 15+ hosts distintos
+id: 1a2b3c4d-5e6f-4a7b-9c8d-0e1f2a3b4c5d
+status: experimental
+description: Uma origem teve conexões negadas contra 15 ou mais hosts distintos em 5 minutos (típico de movimento lateral).
+author: João Guilherme
+date: 2026-10-20
+tags:
+  - attack.discovery
+  - attack.t1046
+  - attack.reconnaissance
+  - attack.t1595.001
+correlation:
+  type: value_count
+  rules:
+    - fw_denied_connection
+  group-by:
+    - src_ip
+  timespan: 5m
+  condition:
+    gte: 15
+    field: dst_ip
+falsepositives:
+  - Health checks de load balancer, service discovery e monitoramento com muitos hosts indisponíveis
+level: medium

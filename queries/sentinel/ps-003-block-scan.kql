@@ -1,0 +1,15 @@
+// PS-003 | Block scan (muitos hosts E muitas portas) | MITRE T1046 / T1595.001
+let lookback = 11m;
+let AllowRanges = toscalar(_GetWatchlist('PortScanAllowlist') | summarize make_list(SearchKey));
+CommonSecurityLog
+| where TimeGenerated > ago(lookback)
+| where isnotempty(SourceIP) and isnotempty(DestinationIP) and DestinationPort > 0
+| where not(ipv4_is_in_range(DestinationIP, "224.0.0.0/4")) and DestinationIP != "255.255.255.255" and not(ipv4_is_in_range(DestinationIP, "169.254.0.0/16"))
+| where not(ipv4_is_in_any_range(SourceIP, AllowRanges))
+| extend Blocked = iff(DeviceAction has_any ("deny", "drop", "block", "reject", "reset"), 1, 0)
+| summarize Events = count(), DistinctHosts = dcount(DestinationIP), DistinctPorts = dcount(DestinationPort),
+            Blocked = sum(Blocked), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by SourceIP
+| extend BlockedRatio = round(todouble(Blocked) / Events, 2)
+| where DistinctHosts >= 5 and DistinctPorts >= 10 and Events >= 30 and BlockedRatio >= 0.5
+| extend Severity = case(DistinctHosts >= 25 and DistinctPorts >= 25, "High", DistinctHosts >= 10, "Medium", "Low")
+| sort by Events desc

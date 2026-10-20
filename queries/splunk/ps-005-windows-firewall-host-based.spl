@@ -1,0 +1,16 @@
+```PS-005 | Port scan contra endpoint (Windows Filtering Platform, EventCode 5157) | MITRE T1046
+Detecção host-based: funciona mesmo sem firewall de perímetro / segmentação interna com logs.
+Requer auditoria "Filtering Platform Connection" habilitada (auditpol /set /subcategory:"Filtering Platform Connection" /failure:enable).
+Os nomes dos campos variam conforme o Splunk Add-on for Microsoft Windows: ajuste Source_Address/Destination_Port.
+Agendamento: a cada 5 min | Janela: -6m@m..-1m@m```
+index=wineventlog EventCode=5157 Direction="%%14592" earliest=-6m@m latest=-1m@m
+| rename Source_Address AS src_ip, Destination_Port AS dest_port, ComputerName AS victim_host
+| where isnotnull(src_ip) AND src_ip!="127.0.0.1" AND src_ip!="::1" AND NOT cidrmatch("224.0.0.0/4",src_ip)
+| lookup portscan_allowlist cidr AS src_ip OUTPUT name AS allow_name
+| where isnull(allow_name)
+| stats count AS blocked_events, dc(dest_port) AS distinct_ports, values(dest_port) AS ports, min(_time) AS first_seen, max(_time) AS last_seen BY src_ip, victim_host
+| where distinct_ports>=15 AND blocked_events>=15
+| eval sample_ports=mvjoin(mvindex(ports,0,9),",")
+| convert ctime(first_seen) ctime(last_seen)
+| fields src_ip victim_host distinct_ports blocked_events sample_ports first_seen last_seen
+| sort - distinct_ports

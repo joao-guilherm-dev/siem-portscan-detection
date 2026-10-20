@@ -1,0 +1,17 @@
+// PS-004 | Scan lento (low-and-slow) | MITRE T1595.001 / T1046
+// Frequência sugerida: 1 h | Período: 24 h
+let lookback = 24h;
+let AllowRanges = toscalar(_GetWatchlist('PortScanAllowlist') | summarize make_list(SearchKey));
+CommonSecurityLog
+| where TimeGenerated > ago(lookback)
+| where isnotempty(SourceIP) and isnotempty(DestinationIP) and DestinationPort > 0
+| where not(ipv4_is_in_range(DestinationIP, "224.0.0.0/4")) and DestinationIP != "255.255.255.255" and not(ipv4_is_in_range(DestinationIP, "169.254.0.0/16"))
+| where not(ipv4_is_in_any_range(SourceIP, AllowRanges))
+| where not(ipv4_is_in_range(SourceIP, "10.10.70.2/32") and DestinationPort in (443, 8443))
+| extend Blocked = iff(DeviceAction has_any ("deny", "drop", "block", "reject", "reset"), 1, 0)
+| summarize Events = count(), DistinctPorts = dcount(DestinationPort), ActiveHours = dcount(bin(TimeGenerated, 1h)),
+            Blocked = sum(Blocked), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by SourceIP, DestinationIP
+| extend BlockedRatio = round(todouble(Blocked) / Events, 2), EventsPerHour = round(todouble(Events) / ActiveHours, 1)
+| where DistinctPorts >= 40 and ActiveHours >= 4 and BlockedRatio >= 0.7 and EventsPerHour <= 60
+| extend Severity = case(DistinctPorts >= 150, "High", DistinctPorts >= 80, "Medium", "Low")
+| sort by DistinctPorts desc

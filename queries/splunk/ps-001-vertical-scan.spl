@@ -1,0 +1,25 @@
+```PS-001 | Port scan vertical (muitas portas em um destino) | MITRE T1046 / T1595.001
+Agendamento: a cada 5 min (cron */5 * * * *) | Janela: earliest=-6m@m latest=-1m@m (tolera atraso de ingestão)
+Throttle: por src_ip + dest_ip por 15 min | Ajuste index/sourcetype ao seu ambiente
+Campos CIM esperados: src_ip, dest_ip, dest_port, action
+Lookups: portscan_allowlist (CIDR) e portscan_service_exceptions (CIDR + porta) -> veja docs/ e README```
+index=network earliest=-6m@m latest=-1m@m
+| where isnotnull(src_ip) AND isnotnull(dest_ip) AND isnotnull(dest_port)
+```Camada 1: descarte estrutural (multicast, broadcast, link-local)```
+| where NOT (cidrmatch("224.0.0.0/4",dest_ip) OR dest_ip="255.255.255.255" OR cidrmatch("169.254.0.0/16",dest_ip))
+```Camada 2: allowlist de origens autorizadas e exceções por serviço```
+| lookup portscan_allowlist cidr AS src_ip OUTPUT name AS allow_name
+| where isnull(allow_name)
+| lookup portscan_service_exceptions cidr AS src_ip, port AS dest_port OUTPUT name AS svc_name
+| where isnull(svc_name)
+```Normaliza a ação do firewall```
+| eval action_norm=case(match(lower(action),"^(block|den|drop|reject|reset)"),"blocked", match(lower(action),"^(allow|accept|permit)"),"allowed", true(),"other")
+| stats count AS events, dc(dest_port) AS distinct_ports, sum(eval(if(action_norm="blocked",1,0))) AS blocked, values(dest_port) AS ports, min(_time) AS first_seen, max(_time) AS last_seen BY src_ip, dest_ip
+```Camada 3: volume mínimo + taxa de falha (scan toca muitas portas fechadas; tráfego legítimo não)```
+| eval blocked_ratio=round(blocked/events,2)
+| where distinct_ports>=20 AND events>=20 AND blocked_ratio>=0.5
+| eval severity=case(distinct_ports>=100,"high", distinct_ports>=40,"medium", true(),"low")
+| eval sample_ports=mvjoin(mvindex(ports,0,9),",")
+| convert ctime(first_seen) ctime(last_seen)
+| fields src_ip dest_ip distinct_ports events blocked blocked_ratio severity sample_ports first_seen last_seen
+| sort - distinct_ports

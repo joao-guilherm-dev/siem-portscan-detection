@@ -1,0 +1,20 @@
+```PS-004 | Scan lento (low-and-slow) | MITRE T1595.001 / T1046
+Evade limiares de janela curta espalhando sondagens por horas. Janela: 24 h.
+Agendamento: a cada 1 h | Janela: earliest=-24h@h latest=@h
+Scans rápidos já são cobertos por PS-001..003: exigimos taxa baixa (<=60 eventos/h ativa) para evitar duplicidade.```
+index=network earliest=-24h@h latest=@h
+| where isnotnull(src_ip) AND isnotnull(dest_ip) AND isnotnull(dest_port)
+| where NOT (cidrmatch("224.0.0.0/4",dest_ip) OR dest_ip="255.255.255.255" OR cidrmatch("169.254.0.0/16",dest_ip))
+| lookup portscan_allowlist cidr AS src_ip OUTPUT name AS allow_name
+| where isnull(allow_name)
+| lookup portscan_service_exceptions cidr AS src_ip, port AS dest_port OUTPUT name AS svc_name
+| where isnull(svc_name)
+| eval action_norm=case(match(lower(action),"^(block|den|drop|reject|reset)"),"blocked", match(lower(action),"^(allow|accept|permit)"),"allowed", true(),"other")
+| eval hour=strftime(_time,"%Y-%m-%d %H")
+| stats count AS events, dc(dest_port) AS distinct_ports, dc(hour) AS active_hours, sum(eval(if(action_norm="blocked",1,0))) AS blocked, min(_time) AS first_seen, max(_time) AS last_seen BY src_ip, dest_ip
+| eval blocked_ratio=round(blocked/events,2), events_per_hour=round(events/active_hours,1)
+| where distinct_ports>=40 AND active_hours>=4 AND blocked_ratio>=0.7 AND events_per_hour<=60
+| eval severity=case(distinct_ports>=150,"high", distinct_ports>=80,"medium", true(),"low")
+| convert ctime(first_seen) ctime(last_seen)
+| fields src_ip dest_ip distinct_ports active_hours events_per_hour blocked_ratio severity first_seen last_seen
+| sort - distinct_ports

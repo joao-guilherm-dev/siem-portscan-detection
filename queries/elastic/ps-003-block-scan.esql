@@ -1,0 +1,14 @@
+// PS-003 | Block scan (muitos hosts E muitas portas) | MITRE T1046 / T1595.001
+// Janela de 10 min. Agende a cada 5 min.
+FROM logs-*, filebeat-*, packetbeat-*
+| WHERE @timestamp >= NOW() - 11 minutes AND @timestamp < NOW() - 1 minute
+| WHERE event.category == "network" AND source.ip IS NOT NULL AND destination.ip IS NOT NULL AND destination.port IS NOT NULL
+| WHERE NOT CIDR_MATCH(destination.ip, "224.0.0.0/4", "255.255.255.255/32", "169.254.0.0/16")
+| WHERE NOT CIDR_MATCH(source.ip, "10.10.50.5/32", "10.10.60.10/32")
+| EVAL blocked_flag = CASE(event.outcome == "failure" OR event.action IN ("denied", "deny", "drop", "dropped", "blocked", "block", "reject", "rejected", "reset"), 1, 0)
+| STATS events = COUNT(*), distinct_hosts = COUNT_DISTINCT(destination.ip), distinct_ports = COUNT_DISTINCT(destination.port), blocked = SUM(blocked_flag), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip
+| EVAL blocked_ratio = ROUND(TO_DOUBLE(blocked) / events, 2)
+| WHERE distinct_hosts >= 5 AND distinct_ports >= 10 AND events >= 30 AND blocked_ratio >= 0.5
+| EVAL severity = CASE(distinct_hosts >= 25 AND distinct_ports >= 25, "high", distinct_hosts >= 10, "medium", "low")
+| SORT events DESC
+| LIMIT 100

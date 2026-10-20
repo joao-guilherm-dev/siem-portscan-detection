@@ -1,0 +1,19 @@
+// PS-005 | Scan originado de um endpoint (Microsoft Defender for Endpoint) | MITRE T1046
+// Tabela: DeviceNetworkEvents. Detecta a máquina COMPROMETIDA fazendo discovery (lado de quem varre).
+// FP: exclui processos de segurança/gestão conhecidos. Revise a lista ExcludedProcesses.
+let lookback = 10m;
+let ExcludedProcesses = dynamic(["nessusd.exe", "nessuscli.exe", "qualysagent.exe", "ZabbixAgent.exe"]);
+DeviceNetworkEvents
+| where Timestamp > ago(lookback)
+| where ActionType in ("ConnectionFailed", "ConnectionAttempt")
+| where RemoteIPType == "Private" or RemoteIPType == "Public"
+| where RemotePort > 0 and isnotempty(RemoteIP)
+| where not(ipv4_is_in_range(RemoteIP, "224.0.0.0/4")) and RemoteIP != "255.255.255.255"
+| where InitiatingProcessFileName !in~ (ExcludedProcesses)
+| summarize Attempts = count(), DistinctHosts = dcount(RemoteIP), DistinctPorts = dcount(RemotePort),
+            Failed = countif(ActionType == "ConnectionFailed"),
+            FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+            by DeviceName, LocalIP, InitiatingProcessFileName, InitiatingProcessAccountName
+| extend FailedRatio = round(todouble(Failed) / Attempts, 2)
+| where Attempts >= 30 and (DistinctPorts >= 20 or DistinctHosts >= 15) and FailedRatio >= 0.5
+| sort by Attempts desc

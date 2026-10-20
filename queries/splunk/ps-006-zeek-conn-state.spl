@@ -1,0 +1,17 @@
+```PS-006 | Port scan via Zeek conn.log (conn_state) | MITRE T1046 / T1595.001
+Zeek classifica o resultado de cada conexão: S0 (SYN sem resposta), REJ (rejeitada), RSTOS0 (SYN + RST do originador),
+SH (SYN + FIN, half-open). Usar conn_state elimina a dependência de "ação do firewall" e reduz FP: conexões que
+completaram handshake (SF) nunca entram na contagem.
+Agendamento: a cada 5 min | Janela: -6m@m..-1m@m```
+index=zeek sourcetype="bro:conn:json" proto=tcp earliest=-6m@m latest=-1m@m conn_state IN ("S0","REJ","RSTOS0","SH")
+| rename "id.orig_h" AS src_ip, "id.resp_h" AS dest_ip, "id.resp_p" AS dest_port
+| where NOT (cidrmatch("224.0.0.0/4",dest_ip) OR dest_ip="255.255.255.255" OR cidrmatch("169.254.0.0/16",dest_ip))
+| lookup portscan_allowlist cidr AS src_ip OUTPUT name AS allow_name
+| where isnull(allow_name)
+| stats count AS failed_conns, dc(dest_port) AS distinct_ports, dc(dest_ip) AS distinct_hosts, values(conn_state) AS states, min(_time) AS first_seen, max(_time) AS last_seen BY src_ip
+| where failed_conns>=30 AND (distinct_ports>=20 OR distinct_hosts>=15)
+| eval scan_type=case(distinct_ports>=20 AND distinct_hosts>=5,"block", distinct_hosts>=15,"horizontal", true(),"vertical")
+| eval severity=case(failed_conns>=500,"high", failed_conns>=150,"medium", true(),"low")
+| convert ctime(first_seen) ctime(last_seen)
+| fields src_ip scan_type distinct_ports distinct_hosts failed_conns states severity first_seen last_seen
+| sort - failed_conns

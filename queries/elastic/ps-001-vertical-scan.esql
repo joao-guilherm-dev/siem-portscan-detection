@@ -1,0 +1,19 @@
+// PS-001 | Port scan vertical (muitas portas em um destino) | MITRE T1046 / T1595.001
+// Elastic 8.15+ (ES|QL). Campos ECS. Agende a cada 5 min (Rule type: ES|QL).
+// Fontes: firewalls (Palo Alto, Fortinet, Cisco ASA via integrações), Packetbeat, Zeek.
+FROM logs-*, filebeat-*, packetbeat-*
+| WHERE @timestamp >= NOW() - 6 minutes AND @timestamp < NOW() - 1 minute
+| WHERE event.category == "network" AND source.ip IS NOT NULL AND destination.ip IS NOT NULL AND destination.port IS NOT NULL
+// Camada 1: descarte estrutural
+| WHERE NOT CIDR_MATCH(destination.ip, "224.0.0.0/4", "255.255.255.255/32", "169.254.0.0/16")
+// Camada 2: allowlist (prefira ENRICH policy ou lista de exceções da regra em produção)
+| WHERE NOT CIDR_MATCH(source.ip, "10.10.50.5/32", "10.10.60.10/32")
+| WHERE NOT (CIDR_MATCH(source.ip, "10.10.70.2/32") AND destination.port IN (443, 8443))
+| EVAL blocked_flag = CASE(event.outcome == "failure" OR event.action IN ("denied", "deny", "drop", "dropped", "blocked", "block", "reject", "rejected", "reset"), 1, 0)
+| STATS events = COUNT(*), distinct_ports = COUNT_DISTINCT(destination.port), blocked = SUM(blocked_flag), min_port = MIN(destination.port), max_port = MAX(destination.port), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp) BY source.ip, destination.ip
+// Camada 3: volume mínimo + taxa de falha
+| EVAL blocked_ratio = ROUND(TO_DOUBLE(blocked) / events, 2)
+| WHERE distinct_ports >= 20 AND events >= 20 AND blocked_ratio >= 0.5
+| EVAL severity = CASE(distinct_ports >= 100, "high", distinct_ports >= 40, "medium", "low")
+| SORT distinct_ports DESC
+| LIMIT 100

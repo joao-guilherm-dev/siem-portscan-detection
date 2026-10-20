@@ -1,0 +1,25 @@
+// PS-001 | Port scan vertical (muitas portas em um destino) | MITRE T1046 / T1595.001
+// Tabela: CommonSecurityLog (firewalls via CEF/AMA). Frequência sugerida: 5 min.
+// Watchlist 'PortScanAllowlist' (SearchKey = IP/CIDR) — crie ao menos 1 entrada (ex.: 127.0.0.1/32).
+let lookback = 6m;
+let min_ports = 20;
+let min_events = 20;
+let min_block_ratio = 0.5;
+let AllowRanges = toscalar(_GetWatchlist('PortScanAllowlist') | summarize make_list(SearchKey));
+CommonSecurityLog
+| where TimeGenerated > ago(lookback)
+| where isnotempty(SourceIP) and isnotempty(DestinationIP) and DestinationPort > 0
+// Camada 1: descarte estrutural
+| where not(ipv4_is_in_range(DestinationIP, "224.0.0.0/4")) and DestinationIP != "255.255.255.255" and not(ipv4_is_in_range(DestinationIP, "169.254.0.0/16"))
+// Camada 2: allowlist + exceção por serviço (inline; ou use uma segunda watchlist)
+| where not(ipv4_is_in_any_range(SourceIP, AllowRanges))
+| where not(ipv4_is_in_range(SourceIP, "10.10.70.2/32") and DestinationPort in (443, 8443))
+| extend Blocked = iff(DeviceAction has_any ("deny", "drop", "block", "reject", "reset"), 1, 0)
+| summarize Events = count(), DistinctPorts = dcount(DestinationPort), Blocked = sum(Blocked),
+            SamplePorts = make_set(DestinationPort, 10), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by SourceIP, DestinationIP
+// Camada 3: volume + taxa de falha
+| extend BlockedRatio = round(todouble(Blocked) / Events, 2)
+| where DistinctPorts >= min_ports and Events >= min_events and BlockedRatio >= min_block_ratio
+| extend Severity = case(DistinctPorts >= 100, "High", DistinctPorts >= 40, "Medium", "Low")
+| sort by DistinctPorts desc

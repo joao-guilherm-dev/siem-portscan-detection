@@ -1,0 +1,34 @@
+# Allowlist = fonte única da verdade. Toda entrada precisa de dono, motivo e data de revisão.
+# Entradas com review_date vencida geram aviso na execução (evita "exceção eterna").
+# Exportar para os SIEMs:  python -m portscan_detection export-allowlist --format splunk
+
+authorized_scanners:
+  - name: Nessus (Time de Vulnerabilidades)
+    cidr: 10.10.50.5/32
+    owner: seguranca@exemplo.com.br
+    reason: Varredura de vulnerabilidades autorizada (janela semanal)
+    review_date: 2027-06-30
+
+monitoring:
+  - name: Zabbix Server
+    cidr: 10.10.60.10/32
+    owner: infra@exemplo.com.br
+    reason: Polling SNMP/HTTPS em toda a rede
+    review_date: 2027-06-30
+
+health_checks: []
+
+# Exceção só para portas específicas (a origem continua monitorada nas demais portas)
+service_exceptions:
+  - name: Load balancer — health check HTTPS
+    cidr: 10.10.70.2/32
+    ports: [443, 8443]
+    owner: redes@exemplo.com.br
+    reason: Health check de pool de servidores (muitos hosts, alta taxa de falha esperada)
+    review_date: 2027-06-30
+
+# Descarte estrutural: nunca é scan
+ignore_destination_cidrs:
+  - 224.0.0.0/4          # multicast (mDNS, SSDP, LLMNR)
+  - 255.255.255.255/32   # broadcast
+  - 169.254.0.0/16       # link-local

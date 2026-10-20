@@ -1,0 +1,16 @@
+```PS-003 | Block scan (muitos hosts E muitas portas) | MITRE T1046 / T1595.001
+Reconhecimento amplo: descoberta de serviços em sub-rede inteira. Janela de 10 min.
+Agendamento: a cada 5 min | Janela: -11m@m..-1m@m```
+index=network earliest=-11m@m latest=-1m@m
+| where isnotnull(src_ip) AND isnotnull(dest_ip) AND isnotnull(dest_port)
+| where NOT (cidrmatch("224.0.0.0/4",dest_ip) OR dest_ip="255.255.255.255" OR cidrmatch("169.254.0.0/16",dest_ip))
+| lookup portscan_allowlist cidr AS src_ip OUTPUT name AS allow_name
+| where isnull(allow_name)
+| eval action_norm=case(match(lower(action),"^(block|den|drop|reject|reset)"),"blocked", match(lower(action),"^(allow|accept|permit)"),"allowed", true(),"other")
+| stats count AS events, dc(dest_ip) AS distinct_hosts, dc(dest_port) AS distinct_ports, sum(eval(if(action_norm="blocked",1,0))) AS blocked, min(_time) AS first_seen, max(_time) AS last_seen BY src_ip
+| eval blocked_ratio=round(blocked/events,2)
+| where distinct_hosts>=5 AND distinct_ports>=10 AND events>=30 AND blocked_ratio>=0.5
+| eval severity=case(distinct_hosts>=25 AND distinct_ports>=25,"high", distinct_hosts>=10,"medium", true(),"low")
+| convert ctime(first_seen) ctime(last_seen)
+| fields src_ip distinct_hosts distinct_ports events blocked_ratio severity first_seen last_seen
+| sort - events

@@ -1,0 +1,56 @@
+# Limiares de detecção — ajuste com base no baseline do SEU ambiente (veja docs/FALSE_POSITIVES.md).
+# Os mesmos valores padrão são usados nas queries de queries/ (Splunk, Elastic, Sentinel, Sigma).
+
+cooldown_seconds: 900          # 1 alerta por campanha: renova enquanto o scan segue; re-arma após 15 min de silêncio
+
+internal_networks:             # define o "escopo" do alerta e o mapeamento MITRE
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+
+sensitive_ports: [21, 22, 23, 25, 135, 139, 445, 1433, 1521, 3306, 3389, 5432, 5900, 5985, 5986, 6379, 9200, 27017]
+
+profiles:
+  # PS-001 — vertical: muitas portas em UM destino
+  - name: ps001_vertical_fast
+    type: vertical
+    window_seconds: 300
+    min_ports: 20
+    min_events: 20
+    min_fail_ratio: 0.5
+
+  # PS-002 — horizontal: UMA porta em muitos hosts (típico de movimento lateral: 445, 3389, 22)
+  - name: ps002_horizontal_fast
+    type: horizontal
+    window_seconds: 300
+    min_hosts: 15
+    min_events: 15
+    min_fail_ratio: 0.5
+
+  # PS-003 — block: muitos hosts E muitas portas
+  - name: ps003_block_fast
+    type: block
+    window_seconds: 600
+    min_hosts: 5
+    min_ports: 10
+    min_events: 30
+    min_fail_ratio: 0.5
+
+  # PS-004 — low-and-slow: janela longa, limiar de falha mais exigente
+  - name: ps004_vertical_slow
+    type: vertical
+    window_seconds: 21600
+    min_ports: 40
+    min_events: 40
+    min_fail_ratio: 0.7
+    min_active_hours: 4        # espalhado por >= 4 horas distintas
+    max_events_per_hour: 60    # taxa baixa (rápidos são cobertos por PS-001..003)
+
+  - name: ps004_horizontal_slow
+    type: horizontal
+    window_seconds: 21600
+    min_hosts: 40
+    min_events: 40
+    min_fail_ratio: 0.7
+    min_active_hours: 4
+    max_events_per_hour: 60

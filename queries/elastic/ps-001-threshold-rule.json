@@ -1,0 +1,48 @@
+{
+  "rule_id": "ps-001-vertical-port-scan",
+  "name": "PS-001 - Port scan vertical (múltiplas portas em um destino)",
+  "description": "Origem tentou conexão em 20+ portas distintas de um mesmo destino em 5 minutos, com falhas/bloqueios. Indica reconhecimento ativo (T1046 interno / T1595.001 externo).",
+  "type": "threshold",
+  "language": "kuery",
+  "index": ["logs-*", "filebeat-*", "packetbeat-*"],
+  "query": "event.category:network and destination.port:* and (event.outcome:failure or event.action:(denied or deny or drop or dropped or blocked or block or reject or rejected or reset)) and not destination.ip:(\"224.0.0.0/4\" or \"255.255.255.255\" or \"169.254.0.0/16\")",
+  "threshold": {
+    "field": ["source.ip", "destination.ip"],
+    "value": 20,
+    "cardinality": [{ "field": "destination.port", "value": 20 }]
+  },
+  "interval": "5m",
+  "from": "now-6m",
+  "to": "now",
+  "max_signals": 100,
+  "risk_score": 47,
+  "severity": "medium",
+  "enabled": false,
+  "tags": ["Domain: Network", "Tactic: Discovery", "Tactic: Reconnaissance", "Use Case: Threat Detection", "Data Source: Firewall"],
+  "false_positives": [
+    "Scanners de vulnerabilidade autorizados (Nessus, Qualys, OpenVAS) — adicione à lista de exceções com dono e data de revisão.",
+    "Servidores de monitoramento (Zabbix, Nagios, PRTG) fazendo polling em várias portas.",
+    "Health checks de load balancers e service discovery.",
+    "Aplicações com portas dinâmicas (RPC 49152-65535): normalmente permitidas, por isso o filtro de falha/bloqueio."
+  ],
+  "note": "Triagem: (1) a origem está na allowlist? (2) alguma porta foi permitida (conexão estabelecida)? (3) houve autenticação ou tráfego do mesmo IP logo após o scan? (4) enriqueça o IP (GreyNoise/Shodan) — ruído de internet inteira tem prioridade menor.",
+  "references": ["https://attack.mitre.org/techniques/T1046/", "https://attack.mitre.org/techniques/T1595/001/"],
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": { "id": "TA0007", "name": "Discovery", "reference": "https://attack.mitre.org/tactics/TA0007/" },
+      "technique": [{ "id": "T1046", "name": "Network Service Discovery", "reference": "https://attack.mitre.org/techniques/T1046/" }]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": { "id": "TA0043", "name": "Reconnaissance", "reference": "https://attack.mitre.org/tactics/TA0043/" },
+      "technique": [{
+        "id": "T1595", "name": "Active Scanning", "reference": "https://attack.mitre.org/techniques/T1595/",
+        "subtechnique": [{ "id": "T1595.001", "name": "Scanning IP Blocks", "reference": "https://attack.mitre.org/techniques/T1595/001/" }]
+      }]
+    }
+  ],
+  "author": ["João Guilherme"],
+  "license": "MIT",
+  "version": 1
+}
